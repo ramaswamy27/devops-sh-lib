@@ -2,7 +2,7 @@
 
 pipeline {
     agent { 
-        label 'enterprise-jump-host' 
+        label 'slave-1'
     }
     
     environment {
