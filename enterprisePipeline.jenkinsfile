@@ -18,7 +18,7 @@ pipeline {
         DEFAULT_BUILD_CMD  = 'echo "No build command provided by developer"'
         
         // SONARQUBE STANDALONE CLI DOWNLOAD URL (Maintained by DevOps)
-        SONAR_CLI_URL      = 'https://sonarsource.com'
+        SONAR_CLI_URL      = 'https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip'
     }
 
     stages {
