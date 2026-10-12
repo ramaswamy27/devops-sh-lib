@@ -1,132 +1,116 @@
 #!/usr/bin/env groovy
 
 def call() {
-    pipeline {
-        agent { label 'slave-1' }
+    // Force the execution framework to grab your high-spec hardware first
+    node('remote-node-4-ci') {
         
-        environment {
-            REGISTRY_CRED      = 'internal-artifactory-auth'
+        // Define global environment controls manually within the node context
+        def REGISTRY_CRED      = 'internal-artifactory-auth'
+        def MAX_ALLOWED_CPUS   = 1
+        def MAX_ALLOWED_MEMORY = 2 // Gigabytes
+        def DEFAULT_CPUS       = '1'
+        def DEFAULT_MEMORY     = '1g'
+        def DEFAULT_BUILD_CMD  = 'echo "No build command provided by developer"'
+        
+        // Target paths and parameters populated dynamically
+        def TEAM_FOLDER        = ""
+        def TARGET_IMAGE       = ""
+        def BUILD_CMD          = ""
+        def RUN_SECURITY_SCANS = "false"
+        def FINAL_CPUS         = ""
+        def FINAL_MEM          = ""
+        def FINAL_SWAP         = ""
+
+        stage('Ingest & Validate Configuration') {
+            // Read YAML directly from the checkout workspace on the JUMP HOST
+            if (!fileExists('pipeline.yaml')) {
+                error "Pipeline Aborted: Missing required 'pipeline.yaml' file in repository root!"
+            }
             
-            // GLOBAL CORPORATE SECURITY BOUNDARIES (Ceilings)
-            MAX_ALLOWED_CPUS   = 16
-            MAX_ALLOWED_MEMORY = 32 // Gigabytes
+            def config = readYaml file: 'pipeline.yaml'
             
-            // LOGISTIC BASELINE FALLBACKS (If integers or strings are omitted in YAML)
-            DEFAULT_CPUS       = '4'
-            DEFAULT_MEMORY     = '8g'
-            DEFAULT_BUILD_CMD  = 'echo "No build command provided by developer"'
+            TEAM_FOLDER = config.pipeline.team_folder ?: error("Pipeline Aborted: 'team_folder' is required in pipeline.yaml!")
             
-            // System Tools Integration
-            SONAR_SCANNER_HOME = tool 'SonarQubeScanner' 
-        }
+            if (!config.pipeline.container?.image) {
+                error "Pipeline Aborted: 'container.image' is required! Explicitly specify a container."
+            }
+            TARGET_IMAGE = config.pipeline.container.image
+            BUILD_CMD    = config.pipeline.environment?.BUILD_COMMAND ?: DEFAULT_BUILD_CMD
 
-        stages {
-            stage('Ingest & Validate Configuration') {
-                steps {
-                    script {
-                        // The Remote Jenkinsfile plugin guarantees this file exists
-                        def config = readYaml file: 'pipeline.yaml'
-                        
-                        // Enforce mandatory structural fields
-                        env.TEAM_FOLDER = config.pipeline.team_folder ?: error("Pipeline Aborted: 'team_folder' is a required field in your pipeline.yaml!")
-                        
-                        // Mandatory Image Enforcement (Strictly no fallback allowed)
-                        if (!config.pipeline.container?.image) {
-                            error "Pipeline Aborted: 'container.image' is required! Dev teams must explicitly specify their custom docker image version."
-                        }
-                        env.TARGET_IMAGE = config.pipeline.container.image
-                        
-                        // Capture Build execution commands
-                        env.BUILD_CMD = config.pipeline.environment?.BUILD_COMMAND ?: env.DEFAULT_BUILD_CMD
-
-                        // --- MULTI-LANGUAGE ARTIFACT CREATION CHECK (IF/ELSE) ---
-                        def lowerCmd = env.BUILD_CMD.toLowerCase()
-                        if (lowerCmd.contains("package") || lowerCmd.contains("install") || lowerCmd.contains("deploy") || 
-                            lowerCmd.contains("build") || lowerCmd.contains("setup.py bdist") || lowerCmd.contains("cargo build")) {
-                            echo "📦 Artifact generation detected. Enforcing security scanners (Trivy & SonarQube)..."
-                            env.RUN_SECURITY_SCANS = "true"
-                        } else {
-                            echo "ℹ️ Baseline verification detected (No artifact generated). Skipping security scanners..."
-                            env.RUN_SECURITY_SCANS = "false"
-                        }
-
-                        // --- STRICT HARD CEILING BOUNDARY ENFORCEMENT ---
-                        def requestedCpus = (config.pipeline.container?.cpus ?: env.DEFAULT_CPUS).toInteger()
-                        def requestedMem  = (config.pipeline.container?.memory ?: env.DEFAULT_MEMORY).replaceAll(/[gG]/, "").toInteger()
-                        
-                        if (requestedCpus > env.MAX_ALLOWED_CPUS.toInteger()) {
-                            error "Pipeline Aborted: Requested CPUs (${requestedCpus}) exceeds policy maximum of ${env.MAX_ALLOWED_CPUS}!"
-                        }
-                        env.FINAL_CPUS = requestedCpus
-
-                        if (requestedMem > env.MAX_ALLOWED_MEMORY.toInteger()) {
-                            error "Pipeline Aborted: Requested Memory (${requestedMem}g) exceeds policy maximum of ${env.MAX_ALLOWED_MEMORY}g!"
-                        }
-                        env.FINAL_MEM = "${requestedMem}g"
-                        
-                        // Clean calculation of Swap mapping
-                        def rawSwap = config.pipeline.container?.memory_swap ?: "${env.FINAL_MEM}"
-                        env.FINAL_SWAP = rawSwap.contains("g") ? rawSwap : "${rawSwap}g"
-                    }
-                }
+            // Multi-language artifact parsing check
+            def lowerCmd = BUILD_CMD.toLowerCase()
+            if (lowerCmd.contains("package") || lowerCmd.contains("install") || lowerCmd.contains("deploy") || 
+                lowerCmd.contains("build") || lowerCmd.contains("setup.py bdist") || lowerCmd.contains("cargo build")) {
+                echo "📦 Artifact generation detected. Enforcing security scanners (Trivy & SonarQube)..."
+                RUN_SECURITY_SCANS = "true"
+            } else {
+                echo "ℹ️ Baseline verification detected. Skipping scanners..."
+                RUN_SECURITY_SCANS = "false"
             }
 
-            stage('Execute Multitenant Secure Workload') {
-                steps {
-                    withDockerRegistry([credentialsId: "${REGISTRY_CRED}"]) {
-                        script {
-                            // Compile dynamic resource runtime flags for the Docker daemon
-                            def dynamicArgs = "--cpus='${env.FINAL_CPUS}' --memory='${env.FINAL_MEM}' --memory-swap='${env.FINAL_SWAP}' -v maven-repo:/root/.m2"
-                            
-                            echo "Spinning up image locally on Jump Host: ${env.TARGET_IMAGE}"
-                            
-                            docker.image("${env.TARGET_IMAGE}").inside(dynamicArgs) {
-                                
-                                // Conditional Execution: Trivy
-                                if (env.RUN_SECURITY_SCANS == "true") {
-                                    stage('Trivy Image Scan') {
-                                        echo "🛡️ Running Trivy vulnerability scan on user-provided image..."
-                                        sh "trivy image --severity HIGH,CRITICAL --exit-code 1 ${env.TARGET_IMAGE}"
-                                    }
-                                }
+            // Resource Limit Constraints Verification
+            def requestedCpus = (config.pipeline.container?.cpus ?: DEFAULT_CPUS).toInteger()
+            def requestedMem  = (config.pipeline.container?.memory ?: DEFAULT_MEMORY).replaceAll(/[gG]/, "").toInteger()
+            
+            if (requestedCpus > MAX_ALLOWED_CPUS) {
+                error "Pipeline Aborted: Requested CPUs (${requestedCpus}) exceeds policy limit of ${MAX_ALLOWED_CPUS}!"
+            }
+            FINAL_CPUS = requestedCpus
 
-                                // Native Execution of Dev Team's Command
-                                stage('Compile & Test Execution') {
-                                    echo "🏗️ Launching pipeline compilation tasks..."
-                                    sh "${env.BUILD_CMD}"
-                                }
+            if (requestedMem > MAX_ALLOWED_MEMORY) {
+                error "Pipeline Aborted: Requested Memory (${requestedMem}g) exceeds policy limit of ${MAX_ALLOWED_MEMORY}g!"
+            }
+            FINAL_MEM = "${requestedMem}g"
+            
+            def rawSwap = config.pipeline.container?.memory_swap ?: FINAL_MEM
+            FINAL_SWAP = rawSwap.contains("g") ? rawSwap : "${rawSwap}g"
+        }
 
-                                // Conditional Execution: SonarQube
-                                if (env.RUN_SECURITY_SCANS == "true") {
-                                    stage('SonarQube Static Analysis') {
-                                        echo "🔍 Project Context: Injecting SonarQube quality gates..."
-                                        withSonarQubeEnv('MySonarQubeServer') {
-                                            sh "${env.SONAR_SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=${env.TEAM_FOLDER} -Dsonar.sources=."
-                                        }
-                                    }
-                                }
+        stage('Execute Multitenant Secure Workload') {
+            // Bind tool configuration to execution node context
+            def sonarScannerHome = tool 'SonarQubeScanner'
+            
+            withDockerRegistry([credentialsId: "${REGISTRY_CRED}"]) {
+                def dynamicArgs = "--cpus='${FINAL_CPUS}' --memory='${FINAL_MEM}' --memory-swap='${FINAL_SWAP}' -v maven-repo:/root/.m2"
+                
+                echo "Spinning up image locally on Jump Host hardware: ${TARGET_IMAGE}"
+                
+                // Launches the container locally on your 512GB server partition
+                docker.image("${TARGET_IMAGE}").inside(dynamicArgs) {
+                    
+                    if (RUN_SECURITY_SCANS == "true") {
+                        stage('Trivy Image Scan') {
+                            sh "trivy image --severity HIGH,CRITICAL --exit-code 1 ${TARGET_IMAGE}"
+                        }
+                    }
 
-                                // --- DYNAMIC INCLUDE PATTERN ---
-                                // Finds and imports src/<team_folder>/CustomLogic.groovy on the fly
-                                try {
-                                    echo "🚀 Routing dynamic post-actions to library source: src/${env.TEAM_FOLDER}/CustomLogic.groovy"
-                                    def teamClass = this.class.classLoader.loadClass("${env.TEAM_FOLDER}.CustomLogic").newInstance(this)
-                                    teamClass.execute()
-                                } catch (ClassNotFoundException e) {
-                                    echo "No CustomLogic.groovy found inside src/${env.TEAM_FOLDER}/. Skipping custom post-build hooks."
-                                }
+                    stage('Compile & Test Execution') {
+                        sh "${BUILD_CMD}"
+                    }
+
+                    if (RUN_SECURITY_SCANS == "true") {
+                        stage('SonarQube Static Analysis') {
+                            withSonarQubeEnv('MySonarQubeServer') {
+                                sh "${sonarScannerHome}/bin/sonar-scanner -Dsonar.projectKey=${TEAM_FOLDER} -Dsonar.sources=."
                             }
                         }
                     }
+
+                    // Dynamic inclusion execution pattern
+                    try {
+                        echo "🚀 Routing post-actions to library module: src/${TEAM_FOLDER}/CustomLogic.groovy"
+                        def teamClass = this.class.classLoader.loadClass("${TEAM_FOLDER}.CustomLogic").newInstance(this)
+                        teamClass.execute()
+                    } catch (ClassNotFoundException e) {
+                        echo "No custom class logic file discovered for ${TEAM_FOLDER}. Skipping custom steps."
+                    }
                 }
             }
         }
-        
-        post {
-            always {
-                // Multi-language Test Coverage Tracking Framework
-                junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml, **/test-results/**/*.xml, **/junit.xml, **/build/test-results/**/*.xml'
-            }
+
+        stage('Publish Results') {
+            // Ensure JUnit results are archived on the node context safely
+            junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml, **/test-results/**/*.xml, **/junit.xml, **/build/test-results/**/*.xml'
         }
     }
 }
