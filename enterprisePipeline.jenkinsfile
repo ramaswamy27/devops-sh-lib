@@ -2,7 +2,7 @@
 
 pipeline {
     agent { 
-        label 'slave-1'
+        label 'slave-1' 
     }
     
     environment {
@@ -17,14 +17,13 @@ pipeline {
         DEFAULT_MEMORY     = '8g'
         DEFAULT_BUILD_CMD  = 'echo "No build command provided by developer"'
         
-        // System Tools Integration
-        SONAR_SCANNER_HOME = tool 'SonarQubeScanner' 
+        // SONARQUBE STANDALONE CLI DOWNLOAD URL (Maintained by DevOps)
+        SONAR_CLI_URL      = 'https://sonarsource.com'
     }
 
     stages {
         stage('Fetch Source Code') {
             steps {
-                // Force the application repo checkout to happen physically on your jump host node disk
                 cleanWs()
                 checkout scm
             }
@@ -33,15 +32,13 @@ pipeline {
         stage('Ingest & Validate Configuration') {
             steps {
                 script {
-                    // This file check executes on your jump host workspace directory
-                    if (!fileExists('.pipeline.yaml')) {
-                        error "Pipeline Aborted: Missing required '.pipeline.yaml' file in your repository root!"
+                    if (!fileExists('pipeline.yaml')) {
+                        error "Pipeline Aborted: Missing required 'pipeline.yaml' file in your repository root!"
                     }
 
-                    // Parse the team's custom YAML parameter file
-                    def config = readYaml file: '.pipeline.yaml'
+                    def config = readYaml file: 'pipeline.yaml'
                     
-                    env.TEAM_FOLDER = config.pipeline.team_folder ?: error("Pipeline Aborted: 'team_folder' is a required field in your .pipeline.yaml!")
+                    env.TEAM_FOLDER = config.pipeline.team_folder ?: error("Pipeline Aborted: 'team_folder' is a required field in your pipeline.yaml!")
                     
                     if (!config.pipeline.container?.image) {
                         error "Pipeline Aborted: 'container.image' is required! Dev teams must explicitly specify their custom docker image version."
@@ -78,6 +75,24 @@ pipeline {
             }
         }
 
+        stage('DevOps Enforced Scanner Preparation') {
+            when {
+                environment name: 'RUN_SECURITY_SCANS', value: 'true'
+            }
+            steps {
+                script {
+                    echo "📥 Downloading standalone SonarQube Scanner CLI into workspace..."
+                    // Download and unzip the scanner directly onto the jump host workspace file structure
+                    sh """
+                        curl -sSLo sonar-scanner.zip ${env.SONAR_CLI_URL}
+                        unzip -q o sonar-scanner.zip
+                        mv sonar-scanner-5.0.1.3006-linux sonar-scanner-bin
+                        chmod +x sonar-scanner-bin/bin/sonar-scanner
+                    """
+                }
+            }
+        }
+
         stage('Execute Multitenant Secure Workload') {
             steps {
                 withDockerRegistry([credentialsId: "${REGISTRY_CRED}"]) {
@@ -100,15 +115,16 @@ pipeline {
 
                             if (env.RUN_SECURITY_SCANS == "true") {
                                 stage('SonarQube Static Analysis') {
+                                    echo "🔍 Injecting SonarQube code quality metrics via workspace dependency injection..."
                                     withSonarQubeEnv('MySonarQubeServer') {
-                                        sh "${env.SONAR_SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=${env.TEAM_FOLDER} -Dsonar.sources=."
+                                        // Because the workspace folder mappings are mounted into the container automatically,
+                                        // the dev container can execute the scanner binary downloaded during stage 3!
+                                        sh "./sonar-scanner-bin/bin/sonar-scanner -Dsonar.projectKey=${env.TEAM_FOLDER} -Dsonar.sources=."
                                     }
                                 }
                             }
 
                             // --- DYNAMIC INCLUDE PATTERN ---
-                            // Since this script is fetched as a standalone file, we tell Jenkins to search its local 
-                            // classpath for the src/ classes loaded via the pipeline plugin environment.
                             try {
                                 echo "🚀 Routing dynamic post-actions to library source: src/${env.TEAM_FOLDER}/CustomLogic.groovy"
                                 def teamClass = this.class.classLoader.loadClass("${env.TEAM_FOLDER}.CustomLogic").newInstance(this)
