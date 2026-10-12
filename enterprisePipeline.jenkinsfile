@@ -84,8 +84,8 @@ pipeline {
                     echo "📥 Downloading standalone SonarQube Scanner CLI into workspace..."
                     // Download and unzip the scanner directly onto the jump host workspace file structure
                     sh """
-                        curl -sSLo sonar-scanner.zip ${env.SONAR_CLI_URL}
-                        unzip -q o sonar-scanner.zip
+                        curl -sSLo sonar-scanner.zip https://sonarsource.com
+                        unzip -qo sonar-scanner.zip
                         mv sonar-scanner-5.0.1.3006-linux sonar-scanner-bin
                         chmod +x sonar-scanner-bin/bin/sonar-scanner
                     """
