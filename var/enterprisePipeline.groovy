@@ -2,7 +2,7 @@
 
 def call() {
     pipeline {
-        agent { label 'remote-node-4-ci' }
+        agent { label 'slave-1' }
         
         environment {
             REGISTRY_CRED      = 'internal-artifactory-auth'
