@@ -11,7 +11,9 @@ class JavaBuilder implements Serializable {
         def nexusUrl = "http://enterprise.internal"
         def version = steps.env.BUILD_NUMBER
         
-        // Define a dynamic Kubernetes pod template using standard scripted DSL
+        // Securely generate a dynamic pod label string avoiding sandbox property locks
+        def uniqueLabel = "java-builder-${version}"
+        
         def podXml = """
             apiVersion: v1
             kind: Pod
@@ -23,11 +25,10 @@ class JavaBuilder implements Serializable {
                 tty: true
         """
         
-        // Execute dynamic execution container matching the requested version
-        steps.podTemplate(yaml: podXml) {
-            steps.node(steps.POD_LABEL) {
+        // Pass the explicit uniqueLabel down into the template engine
+        steps.podTemplate(label: uniqueLabel, yaml: podXml) {
+            steps.node(uniqueLabel) {
                 steps.container('maven-builder') {
-                    // Checkout application code inside the builder container context
                     steps.checkout steps.scm 
                     
                     steps.sh "mvn clean package -DskipTests"

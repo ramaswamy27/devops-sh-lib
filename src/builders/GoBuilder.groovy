@@ -8,6 +8,9 @@ class GoBuilder implements Serializable {
     }
     
     def build(Map yamlConfig) {
+        def version = steps.env.BUILD_NUMBER
+        def uniqueLabel = "go-builder-${version}"
+        
         def podXml = """
             apiVersion: v1
             kind: Pod
@@ -19,8 +22,8 @@ class GoBuilder implements Serializable {
                 tty: true
         """
         
-        steps.podTemplate(yaml: podXml) {
-            steps.node(steps.POD_LABEL) {
+        steps.podTemplate(label: uniqueLabel, yaml: podXml) {
+            steps.node(uniqueLabel) {
                 steps.container('go-builder') {
                     steps.checkout steps.scm
                     steps.sh "go build -o target/app main.go"
