@@ -10,7 +10,7 @@ def call(body) {
     final double MAX_MEMORY_GB = 32.0
 
     // Central local cache repository sitting directly on your massive agent
-    final String HOST_CACHE_BASE = "/home/jenkins-agent/caches"
+    final String HOST_CACHE_BASE = "/home/jenkins/caches"
 
     // Target the single massive administrator agent
     node('remote-node-4-ci') {
@@ -25,7 +25,7 @@ def call(body) {
             
             def config = readYaml file: 'pipeline-config.yaml'
             
-            // Extract resource boundaries
+            // Extract and validate resource configurations
             def requestedCpu = (config.resources?.cpu ?: "2").toDouble()
             def requestedMemStr = config.resources?.memory ?: "4Gi"
 
@@ -51,14 +51,18 @@ def call(body) {
             if (!baseImageName) { error "UNSUPPORTED STACK: '${config.stack}'" }
 
             // ==========================================
-            // LOCAL HOST PERSISTENT VOLUME EXTRACTION
+            // MITIGATION 1: JOB-ISOLATED POISON-PROOF HOST CACHING
             // ==========================================
+            // Safe filesystem path character handling for branch jobs
+            String safeJobPath = env.JOB_NAME.replaceAll(/[^a-zA-Z0-9]/, '-')
+            String hostJobCacheDir = "${HOST_CACHE_BASE}/${safeJobPath}"
+            
             String cacheVolumeFlag = ""
             switch(stackKey) {
-                case 'java':   cacheVolumeFlag = "-v ${HOST_CACHE_BASE}/maven:/root/.m2"; break
-                case 'go':     cacheVolumeFlag = "-v ${HOST_CACHE_BASE}/go:/go/pkg/mod"; break
-                case 'python': cacheVolumeFlag = "-v ${HOST_CACHE_BASE}/pip:/root/.cache/pip"; break
-                case 'rust':   cacheVolumeFlag = "-v ${HOST_CACHE_BASE}/rust:/usr/local/cargo/registry"; break
+                case 'java':   cacheVolumeFlag = "-v ${hostJobCacheDir}/maven:/root/.m2"; break
+                case 'go':     cacheVolumeFlag = "-v ${hostJobCacheDir}/go:/go/pkg/mod"; break
+                case 'python': cacheVolumeFlag = "-v ${hostJobCacheDir}/pip:/root/.cache/pip"; break
+                case 'rust':   cacheVolumeFlag = "-v ${hostJobCacheDir}/rust:/usr/local/cargo/registry"; break
             }
 
             // Map developer strings to real upstream docker tags
@@ -84,7 +88,7 @@ def call(body) {
                 }
             """
 
-            // Dynamic reflection resolution
+            // Dynamic reflection resolution for language handlers
             def handler = null
             String className = "handlers.${stackKey.capitalize()}Handler"
             try {
@@ -94,16 +98,16 @@ def call(body) {
                 error "CRITICAL CONFIGURATION ERROR: Helper class ${className} could not be resolved."
             }
 
-            String containerName = "jenkins-build-${env.JOB_NAME.replaceAll(/[^a-zA-Z0-9]/, '-')}-${env.BUILD_NUMBER}"
+            String containerName = "jenkins-build-${safeJobPath}-${env.BUILD_NUMBER}"
             
             // ==========================================
-            // 2. CONTAINERIZED STACK EXECUTION (HOST CACHED)
+            // 2. CONTAINERIZED STACK EXECUTION
             // ==========================================
             try {
-                // Ensure the localized cache folder directory maps out safely on the host agent file path
-                sh "mkdir -p ${HOST_CACHE_BASE}/${stackKey == 'java' ? 'maven' : stackKey}"
+                // Pre-create the directory mapping layout on the local host agent
+                sh "mkdir -p ${hostJobCacheDir}/maven ${hostJobCacheDir}/go ${hostJobCacheDir}/pip ${hostJobCacheDir}/rust"
                 
-                // Mount the persistent host cache location directly into the runtime context using --net=host
+                // Mount the job-isolated cache volume directly into the runtime context
                 sh "docker run -d --name ${containerName} --net=host --cpus=${requestedCpu} --memory=${dockerMemoryFlag} ${cacheVolumeFlag} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
                 
                 stage('Pre-Build Steps') { handler.preBuild(containerName, config) }
@@ -114,14 +118,23 @@ def call(body) {
             }
 
             // ==========================================
-            // 3. MANDATORY ADMIN SECURITY COMPLIANCE
+            // 3. MANDATORY SECURITY SCAN (FIXED FOR 429 BY CACHE INJECTION)
             // ==========================================
             stage('Mandatory Security Scan') {
+                echo "Running secure filesystem auditing via central tooling..."
                 String scanContainerName = "jenkins-scan-${env.BUILD_NUMBER}"
+                
+                // Construct secondary map matching Trivy's expected internal lookups
+                String trivyCacheFlag = ""
+                if (stackKey == 'java') {
+                    trivyCacheFlag = "-v ${hostJobCacheDir}/maven:/root/.m2"
+                }
+                
                 try {
-                    sh "docker run --rm --name ${scanContainerName} -v ${env.WORKSPACE}:/apps ${SECURE_SCAN_IMAGE} fs --exit-code 1 --severity HIGH,CRITICAL /apps"
+                    // Injecting the local host cache directory directly into Trivy container
+                    sh "docker run --rm --name ${scanContainerName} ${trivyCacheFlag} -v ${env.WORKSPACE}:/apps ${SECURE_SCAN_IMAGE} fs --exit-code 1 --severity HIGH,CRITICAL /apps"
                 } catch (Exception e) {
-                    error "SECURITY COMPLIANCE FAILURE: Vulnerabilities discovered by admin tool."
+                    error "SECURITY COMPLIANCE FAILURE: Vulnerabilities discovered by admin tool. Blocking pipeline progression."
                 }
             }
 
