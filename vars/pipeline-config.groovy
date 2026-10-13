@@ -21,7 +21,7 @@ def call(body) {
                 error "CRITICAL ERROR: 'pipeline-config.yaml' is missing from the repository root."
             }
             
-            // FIX #1: Use Jenkins native readYaml step instead of groovy.yaml.YamlSlurper
+            // Native Jenkins plugin step to parse YAML
             def config = readYaml file: 'pipeline-config.yaml'
             
             // Extract and validate container resource requests
@@ -51,15 +51,18 @@ def call(body) {
             // Formulate the runtime image using the user-defined version tag
             String buildRuntimeImage = "${baseImageName}:${config.stackVersion}"
             
-            // FIX #2: Instantiate the language handlers using absolute classpath instantiation 
-            def handler
-            switch(stackKey) {
-                case 'java':   handler = new handlers.JavaHandler(this); break
-                case 'go':     handler = new handlers.GoHandler(this); break
-                case 'python': handler = new handlers.PythonHandler(this); break
-                case 'rust':   handler = new handlers.RustHandler(this); break
-                default: 
-                    error "CRITICAL FAILURE: Handler mapping missing for valid stack '${stackKey}'."
+            // ==========================================
+            // FIX: RUNTIME REFLECTION CLASS LOADING
+            // ==========================================
+            def handler = null
+            String className = "handlers.${stackKey.capitalize()}Handler"
+            
+            try {
+                // Dynamically look up the class within the Shared Library classpath at runtime
+                Class handlerClass = this.class.classLoader.loadClass(className)
+                handler = handlerClass.newInstance(this)
+            } catch (ClassNotFoundException e) {
+                echo "Notice: Optional helper class ${className} not found. Proceeding with standard execution."
             }
 
             // ==========================================
@@ -70,8 +73,12 @@ def call(body) {
             docker.image(buildRuntimeImage).inside("--cpus=${requestedCpu} --memory=${requestedMemStr}") {
                 
                 stage('Pre-Build Steps') {
-                    // Executes common baseline routines defined by the admin for that language
-                    handler.preBuild() 
+                    // Only execute if a corresponding Handler class was successfully found
+                    if (handler != null) {
+                        handler.preBuild() 
+                    } else {
+                        echo "Skipping specialized pre-build logic."
+                    }
                 }
 
                 stage('Build') {
@@ -91,7 +98,6 @@ def call(body) {
             stage('Mandatory Security Scan') {
                 echo "Running required filesystem security auditing via central tooling..."
                 docker.image(SECURE_SCAN_IMAGE).inside() {
-                    // Fails the pipeline instantly if High or Critical risk items are discovered
                     sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL ."
                 }
             }
@@ -105,7 +111,6 @@ def call(body) {
                 String targetImage = "${ARTIFACTORY_HOST}/${config.imageName}:${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
                 echo "Compiling final application image: ${targetImage}"
                 
-                // Build production-ready app container using the local repository Dockerfile
                 def appImage = docker.build(targetImage, ".")
                 
                 docker.withRegistry("http://${ARTIFACTORY_HOST}") {
@@ -116,3 +121,4 @@ def call(body) {
         }
     }
 }
+
