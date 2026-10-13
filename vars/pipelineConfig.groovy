@@ -25,7 +25,7 @@ def call(body) {
             def config = readYaml file: 'pipeline-config.yaml'
             
             // Extract and validate container resource requests
-            def requestedCpu = (config.resources?.cpu ?: "2").toInteger()
+            def requestedCpu = (config.resources?.cpu ?: "2").toDouble()
             def requestedMemStr = config.resources?.memory ?: "4Gi"
 	    // Convert Kubernetes style 'Gi/Mi' into Docker CLI compatible 'g/m'
 	    String dockerMemoryFlag = requestedMemStr.toLowerCase().replaceAll(/i/, '')
