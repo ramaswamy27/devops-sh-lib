@@ -93,7 +93,7 @@ def call(body) {
             String buildContainerName = "jenkins-build-${env.JOB_NAME.replaceAll(/[^a-zA-Z0-9]/, '-')}-${env.BUILD_NUMBER}"
             
             try {
-                sh "docker run -d --name ${buildContainerName} --cpus=${requestedCpu} --memory=${dockerMemoryFlag} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
+                sh "docker run -d --name ${buildContainerName} --net=host --cpus=${requestedCpu} --memory=${dockerMemoryFlag} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
                 
                 stage('Pre-Build Steps') {
                     if (handler != null) { handler.preBuild() }
