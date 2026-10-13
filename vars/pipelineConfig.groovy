@@ -4,7 +4,7 @@ def call(body) {
     // ==========================================
     // 1. ADMIN CENTRAL CONFIGURATIONS & GUARDRAILS
     // ==========================================
-    final String ARTIFACTORY_HOST = "10.0.0.5:5001" 
+    final String ARTIFACTORY_HOST = "192.168.122.154:5001" 
     final String SECURE_SCAN_IMAGE = "aquasec/trivy:latest" 
     final int MAX_CPU = 16
     final int MAX_MEMORY_GB = 32
@@ -27,6 +27,8 @@ def call(body) {
             // Extract and validate container resource requests
             def requestedCpu = (config.resources?.cpu ?: "2").toInteger()
             def requestedMemStr = config.resources?.memory ?: "4Gi"
+	    // Convert Kubernetes style 'Gi/Mi' into Docker CLI compatible 'g/m'
+	    String dockerMemoryFlag = requestedMemStr.toLowerCase().replaceAll(/i/, '')
             def requestedMem = requestedMemStr.replaceAll(/[^\d]/, '').toInteger()
 
             if (requestedCpu > MAX_CPU || requestedMem > MAX_MEMORY_GB) {
@@ -72,7 +74,7 @@ def call(body) {
             
             try {
                 // Spin up application runtime container detached, passing current workspace folder inside
-                sh "docker run -d --name ${buildContainerName} --cpus=${requestedCpu} --memory=${requestedMemStr} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
+                sh "docker run -d --name ${buildContainerName} --cpus=${requestedCpu} --memory=${dockerMemoryFlag} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
                 
                 stage('Pre-Build Steps') {
                     if (handler != null) {
