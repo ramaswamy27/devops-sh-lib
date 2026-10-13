@@ -10,7 +10,7 @@ def call(body) {
     final double MAX_MEMORY_GB = 32.0
 
     // Target the single massive administrator agent
-    node('massive-agent') {
+    node('remote-node-4-ci') {
         currentBuild.result = "SUCCESS"
 
         stage('Checkout & Validation') {
