@@ -10,15 +10,17 @@ class PipelineOrchestrator implements Serializable {
         this.steps = steps
     }
     
-    def execute(Map yamlConfig) {
-        // Enforce the standard Declarative Pipeline structure programmatically
+    def execute() {
         steps.pipeline {
-            steps.agent any
+            steps.agent any // <-- This allocates the required hudson.FilePath context variable!
             
             steps.stages {
-                steps.stage('Build & Test Artifact') {
+                steps.stage('Parse & Build Artifact') {
                     steps.steps {
                         steps.script {
+                            // 1. Safe to read file now that a workspace context is present
+                            def yamlConfig = steps.readYaml file: 'pipeline.yaml'
+                            
                             steps.echo "Compiling code for stack: ${yamlConfig.stack} (Version: ${yamlConfig.version})"
                             
                             if (yamlConfig.stack == 'java') {
@@ -35,6 +37,9 @@ class PipelineOrchestrator implements Serializable {
                 steps.stage('Secure Infrastructure Deployment') {
                     steps.steps {
                         steps.script {
+                            // 2. Re-read or pass the object to your deployment block
+                            def yamlConfig = steps.readYaml file: 'pipeline.yaml'
+                            
                             steps.echo "Routing deployment to target: ${yamlConfig.deployment.type}"
                             
                             if (yamlConfig.deployment.type == 'kubernetes') {
