@@ -5,5 +5,5 @@ def call() {
     def orchestrator = new PipelineOrchestrator(this)
     
     // 2. Kick off execution
-    orchestrator.execute(yamlConfig)
+    orchestrator.execute()
 }
