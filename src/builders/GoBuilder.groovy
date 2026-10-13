@@ -8,8 +8,7 @@ class GoBuilder implements Serializable {
     }
     
     def build(Map yamlConfig) {
-        steps.kubernetes {
-            yaml """
+        def podXml = """
             apiVersion: v1
             kind: Pod
             spec:
@@ -18,12 +17,16 @@ class GoBuilder implements Serializable {
                 image: golang:${yamlConfig.version}-alpine
                 command: ['cat']
                 tty: true
-            """
-        }
-        steps.container('go-builder') {
-            steps.sh "go build -o target/app main.go"
-            steps.sh "go test ./..."
-            // Nexus upload logic for binaries goes here
+        """
+        
+        steps.podTemplate(yaml: podXml) {
+            steps.node(steps.POD_LABEL) {
+                steps.container('go-builder') {
+                    steps.checkout steps.scm
+                    steps.sh "go build -o target/app main.go"
+                    steps.sh "go test ./..."
+                }
+            }
         }
     }
 }

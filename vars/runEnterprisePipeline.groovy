@@ -1,24 +1,24 @@
 import PipelineOrchestrator
 
 def call() {
-    // 1. Establish the declarative framework natively at the script level
     pipeline {
-        agent any
+        agent none // Dynamic builder classes allocate their own isolated environments
         
         stages {
-            stage('Build & Test Artifact') {
+            stage('Dynamic Orchestrated Build') {
+                // Allocate a temporary workspace manager just to parse the pipeline configurations
+                agent any 
                 steps {
                     script {
-                        // 2. Instantiate and run the orchestrator step
                         def orchestrator = new PipelineOrchestrator(this)
                         orchestrator.executeBuild()
                     }
                 }
             }
-            stage('Secure Infrastructure Deployment') {
+            stage('Dynamic Orchestrated Deployment') {
+                agent any
                 steps {
                     script {
-                        // 3. Execute the deployment step
                         def orchestrator = new PipelineOrchestrator(this)
                         orchestrator.executeDeploy()
                     }
