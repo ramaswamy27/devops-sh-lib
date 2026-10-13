@@ -5,7 +5,7 @@ def call(body) {
     // 1. ADMIN CENTRAL CONFIGURATIONS & GUARDRAILS
     // ==========================================
     final String ARTIFACTORY_HOST = "192.168.122.154:5000" 
-    final String SECURE_SCAN_IMAGE = "aquasec/trivy:latest" 
+    final String SECURE_SCAN_IMAGE = "${ARTIFACTORY_HOST}/aquasec/trivy:latest" 
     final double MAX_CPU = 16.0
     final double MAX_MEMORY_GB = 32.0
 
@@ -64,9 +64,9 @@ def call(body) {
                 error "UNSUPPORTED STACK: '${config.stack}' is not registered in the central Admin library. Allowed: java, go, python, rust." 
             }
             
-            // Formulate the runtime image using the user-defined version tag
-            String buildRuntimeImage = "${baseImageName}:${config.stackVersion}"
-            
+            // Prepend the ARTIFACTORY_HOST to pull base images from your internal network
+            String buildRuntimeImage = "${ARTIFACTORY_HOST}/${baseImageName}:${config.stackVersion}"
+
             // Runtime reflection class loading for language handlers
             def handler = null
             String className = "handlers.${stackKey.capitalize()}Handler"
@@ -79,7 +79,7 @@ def call(body) {
             }
 
             // ==========================================
-            // 2. CONTAINERIZED STACK EXECUTION (NATIVE)
+            // 2. CONTAINERIZED STACK EXECUTION (NO MOUNTED CACHE)
             // ==========================================
             echo "Spinning up container runtime [${buildRuntimeImage}] with allocated limits: ${requestedCpu} CPU, ${dockerMemoryFlag} Memory."
             
@@ -87,7 +87,7 @@ def call(body) {
             String buildContainerName = "jenkins-build-${env.JOB_NAME.replaceAll(/[^a-zA-Z0-9]/, '-')}-${env.BUILD_NUMBER}"
             
             try {
-                // Spin up application runtime container detached, passing current workspace folder inside
+                // Spin up application runtime container detached, mounting only the active workspace folder
                 sh "docker run -d --name ${buildContainerName} --cpus=${requestedCpu} --memory=${dockerMemoryFlag} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
                 
                 stage('Pre-Build Steps') {
@@ -144,3 +144,4 @@ def call(body) {
         }
     }
 }
+
