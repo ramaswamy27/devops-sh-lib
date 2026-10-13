@@ -1,15 +1,10 @@
 #!/usr/bin/groovy
-import groovy.yaml.YamlSlurper
-import handlers.JavaHandler
-import handlers.GoHandler
-import handlers.PythonHandler
-import handlers.RustHandler
 
 def call(body) {
     // ==========================================
     // 1. ADMIN CENTRAL CONFIGURATIONS & GUARDRAILS
     // ==========================================
-    final String ARTIFACTORY_HOST = "192.168.122.154:5000" 
+    final String ARTIFACTORY_HOST = "10.0.0.5:5001" 
     final String SECURE_SCAN_IMAGE = "aquasec/trivy:latest" 
     final int MAX_CPU = 16
     final int MAX_MEMORY_GB = 32
@@ -22,13 +17,12 @@ def call(body) {
             // SCM checkout happens automatically first
             checkout scm 
             
-            // Read and parse the developer configuration payload
             if (!fileExists('pipeline-config.yaml')) {
                 error "CRITICAL ERROR: 'pipeline-config.yaml' is missing from the repository root."
             }
             
-            def yamlText = readFile('pipeline-config.yaml')
-            def config = new YamlSlurper().parseText(yamlText)
+            // FIX #1: Use Jenkins native readYaml step instead of groovy.yaml.YamlSlurper
+            def config = readYaml file: 'pipeline-config.yaml'
             
             // Extract and validate container resource requests
             def requestedCpu = (config.resources?.cpu ?: "2").toInteger()
@@ -57,13 +51,13 @@ def call(body) {
             // Formulate the runtime image using the user-defined version tag
             String buildRuntimeImage = "${baseImageName}:${config.stackVersion}"
             
-            // Instantiate the correct language handler instance based on stack input
+            // FIX #2: Instantiate the language handlers using absolute classpath instantiation 
             def handler
             switch(stackKey) {
-                case 'java':   handler = new JavaHandler(steps); break
-                case 'go':     handler = new GoHandler(steps); break
-                case 'python': handler = new PythonHandler(steps); break
-                case 'rust':   handler = new RustHandler(steps); break
+                case 'java':   handler = new handlers.JavaHandler(this); break
+                case 'go':     handler = new handlers.GoHandler(this); break
+                case 'python': handler = new handlers.PythonHandler(this); break
+                case 'rust':   handler = new handlers.RustHandler(this); break
                 default: 
                     error "CRITICAL FAILURE: Handler mapping missing for valid stack '${stackKey}'."
             }
