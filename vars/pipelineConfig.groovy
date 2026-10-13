@@ -10,7 +10,7 @@ def call(body) {
     final double MAX_MEMORY_GB = 32.0
 
     // Central local cache repository sitting directly on your massive agent
-    final String HOST_CACHE_BASE = "/home/jenkins/caches"
+    final String HOST_CACHE_BASE = "/home/jenkins-agent/caches"
 
     // Target the single massive administrator agent
     node('remote-node-4-ci') {
