@@ -4,10 +4,10 @@ def call(body) {
     // ==========================================
     // 1. ADMIN CENTRAL CONFIGURATIONS & GUARDRAILS
     // ==========================================
-    final String ARTIFACTORY_HOST = "192.168.122.154:5001" 
+    final String ARTIFACTORY_HOST = "192.168.122.154:5000" 
     final String SECURE_SCAN_IMAGE = "aquasec/trivy:latest" 
-    final int MAX_CPU = 16
-    final int MAX_MEMORY_GB = 32
+    final double MAX_CPU = 16.0
+    final double MAX_MEMORY_GB = 32.0
 
     // Target the single massive administrator agent
     node('remote-node-4-ci') {
@@ -24,16 +24,30 @@ def call(body) {
             // Native Jenkins plugin step to parse YAML
             def config = readYaml file: 'pipeline-config.yaml'
             
-            // Extract and validate container resource requests
+            // Extract resource allocations (supporting decimal CPU formatting like "0.10")
             def requestedCpu = (config.resources?.cpu ?: "2").toDouble()
             def requestedMemStr = config.resources?.memory ?: "4Gi"
-	    // Convert Kubernetes style 'Gi/Mi' into Docker CLI compatible 'g/m'
-	    String dockerMemoryFlag = requestedMemStr.toLowerCase().replaceAll(/i/, '')
-            def requestedMem = requestedMemStr.replaceAll(/[^\d]/, '').toInteger()
 
-            if (requestedCpu > MAX_CPU || requestedMem > MAX_MEMORY_GB) {
+            // Compute actual requested size in GB for safety validation
+            double requestedMemGB = 0.0
+            String cleanMemStr = requestedMemStr.toUpperCase()
+            double numericalValue = cleanMemStr.replaceAll(/[^\d\.]/, '').toDouble()
+
+            if (cleanMemStr.contains("M")) {
+                requestedMemGB = numericalValue / 1024.0 // Convert MB to GB
+            } else if (cleanMemStr.contains("G")) {
+                requestedMemGB = numericalValue         // Already in GB
+            } else {
+                requestedMemGB = numericalValue / (1024.0 * 1024.0 * 1024.0) // Assume raw bytes if no suffix
+            }
+
+            // Admin Safety Boundary Check (Enforced dynamically in GB/Doubles)
+            if (requestedCpu > MAX_CPU || requestedMemGB > MAX_MEMORY_GB) {
                 error "SECURITY VIOLATION: Requested resources (${requestedCpu} CPU / ${requestedMemStr}) exceed Admin safety limits (Max: ${MAX_CPU} CPU / ${MAX_MEMORY_GB}Gi)."
             }
+
+            // Convert Kubernetes style '100Mi' or '8Gi' to Docker CLI compliant '100m' or '8g'
+            String dockerMemoryFlag = requestedMemStr.toLowerCase().replaceAll(/i/, '')
 
             // Map stack strings to baseline official Docker images
             def imageMap = [
@@ -67,7 +81,7 @@ def call(body) {
             // ==========================================
             // 2. CONTAINERIZED STACK EXECUTION (NATIVE)
             // ==========================================
-            echo "Spinning up container runtime [${buildRuntimeImage}] with allocated limits: ${requestedCpu} CPU, ${requestedMemStr} Memory."
+            echo "Spinning up container runtime [${buildRuntimeImage}] with allocated limits: ${requestedCpu} CPU, ${dockerMemoryFlag} Memory."
             
             // Unique container runtime name to prevent overlap collisions
             String buildContainerName = "jenkins-build-${env.JOB_NAME.replaceAll(/[^a-zA-Z0-9]/, '-')}-${env.BUILD_NUMBER}"
@@ -130,4 +144,3 @@ def call(body) {
         }
     }
 }
-
