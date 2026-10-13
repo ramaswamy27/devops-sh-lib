@@ -10,7 +10,7 @@ def call(body) {
     final int MAX_MEMORY_GB = 32
 
     // Target the single massive administrator agent
-    node('remote-node-4-ci') {
+    node('massive-agent') {
         currentBuild.result = "SUCCESS"
 
         stage('Checkout & Validation') {
@@ -51,14 +51,11 @@ def call(body) {
             // Formulate the runtime image using the user-defined version tag
             String buildRuntimeImage = "${baseImageName}:${config.stackVersion}"
             
-            // ==========================================
-            // FIX: RUNTIME REFLECTION CLASS LOADING
-            // ==========================================
+            // Runtime reflection class loading for language handlers
             def handler = null
             String className = "handlers.${stackKey.capitalize()}Handler"
             
             try {
-                // Dynamically look up the class within the Shared Library classpath at runtime
                 Class handlerClass = this.class.classLoader.loadClass(className)
                 handler = handlerClass.newInstance(this)
             } catch (ClassNotFoundException e) {
@@ -66,14 +63,18 @@ def call(body) {
             }
 
             // ==========================================
-            // 2. CONTAINERIZED STACK EXECUTION
+            // 2. CONTAINERIZED STACK EXECUTION (NATIVE)
             // ==========================================
             echo "Spinning up container runtime [${buildRuntimeImage}] with allocated limits: ${requestedCpu} CPU, ${requestedMemStr} Memory."
             
-            docker.image(buildRuntimeImage).inside("--cpus=${requestedCpu} --memory=${requestedMemStr}") {
+            // Unique container runtime name to prevent overlap collisions
+            String buildContainerName = "jenkins-build-${env.JOB_NAME.replaceAll(/[^a-zA-Z0-9]/, '-')}-${env.BUILD_NUMBER}"
+            
+            try {
+                // Spin up application runtime container detached, passing current workspace folder inside
+                sh "docker run -d --name ${buildContainerName} --cpus=${requestedCpu} --memory=${requestedMemStr} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
                 
                 stage('Pre-Build Steps') {
-                    // Only execute if a corresponding Handler class was successfully found
                     if (handler != null) {
                         handler.preBuild() 
                     } else {
@@ -83,13 +84,16 @@ def call(body) {
 
                 stage('Build') {
                     if (!config.buildCmd) { error "Configuration Error: 'buildCmd' is empty." }
-                    sh "${config.buildCmd}"
+                    sh "docker exec ${buildContainerName} ${config.buildCmd}"
                 }
                 
                 stage('Test') {
                     if (!config.testCmd) { error "Configuration Error: 'testCmd' is empty." }
-                    sh "${config.testCmd}"
+                    sh "docker exec ${buildContainerName} ${config.testCmd}"
                 }
+            } finally {
+                // Guaranteed safety cleanup block to ensure agent is never choked by orphaned containers
+                sh "docker rm -f ${buildContainerName} || true"
             }
 
             // ==========================================
@@ -97,8 +101,11 @@ def call(body) {
             // ==========================================
             stage('Mandatory Security Scan') {
                 echo "Running required filesystem security auditing via central tooling..."
-                docker.image(SECURE_SCAN_IMAGE).inside() {
-                    sh "trivy fs --exit-code 1 --severity HIGH,CRITICAL ."
+                String scanContainerName = "jenkins-scan-${env.BUILD_NUMBER}"
+                try {
+                    sh "docker run --rm --name ${scanContainerName} -v ${env.WORKSPACE}:/apps ${SECURE_SCAN_IMAGE} fs --exit-code 1 --severity HIGH,CRITICAL /apps"
+                } catch (Exception e) {
+                    error "SECURITY COMPLIANCE FAILURE: Vulnerabilities discovered by admin tool. Blocking artifact delivery."
                 }
             }
 
@@ -111,11 +118,11 @@ def call(body) {
                 String targetImage = "${ARTIFACTORY_HOST}/${config.imageName}:${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
                 echo "Compiling final application image: ${targetImage}"
                 
-                def appImage = docker.build(targetImage, ".")
+                // Native Docker build and push commands directly executed on the massive local agent
+                sh "docker build -t ${targetImage} ."
+                sh "docker push ${targetImage}"
+                sh "docker rmi ${targetImage} || true" // Clean up image cache locally
                 
-                docker.withRegistry("http://${ARTIFACTORY_HOST}") {
-                    appImage.push()
-                }
                 echo "Successfully delivered image payload to local Artifactory registry."
             }
         }
