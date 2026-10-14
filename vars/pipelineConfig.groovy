@@ -85,6 +85,7 @@ def call(body) {
                 docker image inspect ${buildRuntimeImage} >/dev/null 2>&1 || {
                     docker pull ${upstreamTarget}
                     docker tag ${upstreamTarget} ${buildRuntimeImage}
+		    docker push ${buildRuntimeImage}
                 }
             """
 
