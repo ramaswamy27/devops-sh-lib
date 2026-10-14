@@ -140,7 +140,7 @@ def call(body) {
             // 4. IMAGE DISTRIBUTION & PUBLISHING
             // ==========================================
             stage('Publish to Artifactory') {
-                String targetImage = "${ARTIFACTORY_HOST}/${config.imageName}:${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
+                String targetImage = "${ARTIFACTORY_HOST}/${config.imageName}:${config.imageVer}"
                 handler.packageAndPublish(targetImage, ARTIFACTORY_HOST)
             }
         }
