@@ -106,7 +106,7 @@ def call(body) {
             try {
                 // Pre-create the directory mapping layout on the local host agent
                 sh "mkdir -p ${hostJobCacheDir}/maven ${hostJobCacheDir}/go ${hostJobCacheDir}/pip ${hostJobCacheDir}/rust"
-                chmod -R 777 ${hostJobCacheDir}
+                sh "chmod -R 777 ${hostJobCacheDir}"
                 
                 // Mount the job-isolated cache volume directly into the runtime context
                 sh "docker run -d --name ${containerName} --cpus=${requestedCpu} --memory=${dockerMemoryFlag} ${cacheVolumeFlag} -v ${env.WORKSPACE}:${env.WORKSPACE} -w ${env.WORKSPACE} ${buildRuntimeImage} tail -f /dev/null"
