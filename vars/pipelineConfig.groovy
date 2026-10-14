@@ -5,7 +5,7 @@ def call(body) {
     // 1. ADMIN CENTRAL CONFIGURATIONS & GUARDRAILS
     // ==========================================
     final String ARTIFACTORY_HOST = "192.168.122.154:5000" 
-    final String SECURE_SCAN_IMAGE = "aquasec/trivy:latest" 
+    final String SECURE_SCAN_IMAGE = "${ARTIFACTORY_HOST}/trivy:latest" 
     final double MAX_CPU = 16.0
     final double MAX_MEMORY_GB = 32.0
 
