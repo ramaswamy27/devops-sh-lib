@@ -65,27 +65,21 @@ def call(body) {
                 case 'rust':   cacheVolumeFlag = "-v ${hostJobCacheDir}/rust:/usr/local/cargo/registry"; break
             }
 
-            // Map developer strings to real upstream docker tags
-            def upstreamImageMap = [
-                'java-1.17': 'maven:3.9.6-eclipse-temurin-17',
-                'java-1.21': 'maven:3.9.6-eclipse-temurin-21',
-                'go-1.21':   'golang:1.21-bookworm',
-                'python-3':  'python:3.11-slim',
-                'rust-1':    'rust:1.75-slim'
-            ]
-            
-            String versionKey = config.stackVersion?.toLowerCase()
-            String lookupString = "${stackKey}-${versionKey}"
-            String upstreamTarget = upstreamImageMap[lookupString] ?: upstreamImageMap["${stackKey}-1.21"]
+            // ==========================================
+            // MAPLESS SINGLE-FIELD UPSTREAM DISCOVERY
+            // ==========================================
+            // 1. Direct upstream target constructed straight from the developer's input tag
+            String upstreamTarget = "${baseImageName}:${config.stackVersion}" 
 
+            // 2. Local target tag for your private registry node (matches handlers)
             String buildRuntimeImage = "${ARTIFACTORY_HOST}/${baseImageName}:${config.stackVersion}"
 
-            // Pull public upstream image name first, then tag it locally
+            // 3. Pull, tag, and immediately seed the remote registry node dynamically
             sh """
                 docker image inspect ${buildRuntimeImage} >/dev/null 2>&1 || {
                     docker pull ${upstreamTarget}
                     docker tag ${upstreamTarget} ${buildRuntimeImage}
-		    docker push ${buildRuntimeImage}
+                    docker push ${buildRuntimeImage}
                 }
             """
 
@@ -107,6 +101,8 @@ def call(body) {
             try {
                 // Pre-create the directory mapping layout on the local host agent
                 sh "mkdir -p ${hostJobCacheDir}/maven ${hostJobCacheDir}/go ${hostJobCacheDir}/pip ${hostJobCacheDir}/rust"
+                
+                // FIXED: Wrapped permissions in standard string format to prevent Groovy compilation syntax crashes
                 sh "chmod -R 777 ${hostJobCacheDir}"
                 
                 // Mount the job-isolated cache volume directly into the runtime context
