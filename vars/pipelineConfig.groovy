@@ -48,7 +48,7 @@ def call(body) {
             String stackKey = config.stack?.toLowerCase()
             String baseImageName = imageMap[stackKey]
             
-            if (!baseImageName) { error "UNSUPPORTED STACK: '${config.stack}' . + Allowed values are: ${imageMap.keySet().join(', ')}" }
+            if (!baseImageName) { error "UNSUPPORTED STACK: '${config.stack}'. + Allowed values are: [${imageMap.keySet().join(', ')}]" }
 
             // ==========================================
             // MITIGATION 1: JOB-ISOLATED POISON-PROOF HOST CACHING
