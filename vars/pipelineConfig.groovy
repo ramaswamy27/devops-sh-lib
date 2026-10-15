@@ -45,10 +45,11 @@ def call(body) {
 
             // Map stack strings to baseline official Docker images
             def imageMap = ['java': 'maven', 'go': 'golang', 'python': 'python', 'rust': 'rust']
-            String stackKey = config.stack?.toLowerCase()
-            String baseImageName = imageMap[stackKey]
+            // Rama  String stackKey = config.stack?.toLowerCase()
+            String dockerImageKey = config.dockerImage?.toLowerCase()
+            String baseImageName = imageMap[dockerImageKey]
             
-            if (!baseImageName) { error "UNSUPPORTED STACK: '${config.stack}'. + Allowed values are: [${imageMap.keySet().join(', ')}]" }
+            if (!baseImageName) { error "UNSUPPORTED STACK: '${config.dockerImageKey}'. + Allowed values are: [${imageMap.keySet().join(', ')}]" }
 
             // ==========================================
             // MITIGATION 1: JOB-ISOLATED POISON-PROOF HOST CACHING
@@ -58,7 +59,7 @@ def call(body) {
             String hostJobCacheDir = "${HOST_CACHE_BASE}/${safeJobPath}"
             
             String cacheVolumeFlag = ""
-            switch(stackKey) {
+            switch(dockerImageKey) {
                 case 'java':   cacheVolumeFlag = "-v ${hostJobCacheDir}/maven:/root/.m2"; break
                 case 'go':     cacheVolumeFlag = "-v ${hostJobCacheDir}/go:/go/pkg/mod"; break
                 case 'python': cacheVolumeFlag = "-v ${hostJobCacheDir}/pip:/root/.cache/pip"; break
@@ -69,10 +70,10 @@ def call(body) {
             // MAPLESS SINGLE-FIELD UPSTREAM DISCOVERY
             // ==========================================
             // 1. Direct upstream target constructed straight from the developer's input tag
-            String upstreamTarget = "${baseImageName}:${config.stackVersion}" 
+            String upstreamTarget = "${baseImageName}:${config.imageVersion}" 
 
             // 2. Local target tag for your private registry node (matches handlers)
-            String buildRuntimeImage = "${ARTIFACTORY_HOST}/${baseImageName}:${config.stackVersion}"
+            String buildRuntimeImage = "${ARTIFACTORY_HOST}/${baseImageName}:${config.imageVersion}"
 
             // 3. Pull, tag, and immediately seed the remote registry node dynamically
             sh """
@@ -85,7 +86,7 @@ def call(body) {
 
             // Dynamic reflection resolution for language handlers
             def handler = null
-            String className = "handlers.${stackKey.capitalize()}Handler"
+            String className = "handlers.${dockerImageKey.capitalize()}Handler"
             try {
                 Class handlerClass = this.class.classLoader.loadClass(className)
                 handler = handlerClass.newInstance(this)
@@ -124,7 +125,7 @@ def call(body) {
                 
                 // Construct secondary map matching Trivy's expected internal lookups
                 String trivyCacheFlag = ""
-                if (stackKey == 'java') {
+                if (dockerImageKey == 'java') {
                     trivyCacheFlag = "-v ${hostJobCacheDir}/maven:/root/.m2"
                 }
                 

@@ -21,12 +21,18 @@ class GoHandler implements Serializable {
         steps.sh "docker exec ${containerName} ${config.testCmd}"
     }
 
-    def packageAndPublish(String targetImage, String artifactoryHost) {
+    def packageAndPublish(String targetImage, String artifactoryHost, def config) {
+	if (!config.dockerImage || !config.config.imageVer) {
+	    steps.error "Pipeline Failure: 'dockerImage' and 'imageVersion' are required in pipeline-config.yaml"
+	}
+	String baseImage = config.dockerImage
+	String baseVer   = config.imageVer
+	String baseRuntime = "${ARTIFACTORY_HOST}/${baseImage}:${baseVer}"
         String syntheticDockerfile = """
-            FROM ${artifactoryHost}/alpine:latest
+            FROM ${baseRuntime}
             WORKDIR /app
             COPY . . 
-            ENTRYPOINT ["./main"]
+            ENTRYPOINT ["./app-binary"]
         """.stripIndent()
 
         steps.writeFile file: 'Dockerfile.synthetic', text: syntheticDockerfile
