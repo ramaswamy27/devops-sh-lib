@@ -49,7 +49,7 @@ def call(body) {
             String dockerImageKey = config.dockerImage?.toLowerCase()
             String baseImageName = imageMap[dockerImageKey]
             
-            if (!baseImageName) { error "UNSUPPORTED STACK: '${config.dockerImageKey}'. + Allowed values are: [${imageMap.keySet().join(', ')}]" }
+            if (!baseImageName) { error "UNSUPPORTED DOCKER-IMAGE: '${config.dockerImageKey}'.  Allowed values are: [${imageMap.keySet().join(', ')}]" }
 
             // ==========================================
             // MITIGATION 1: JOB-ISOLATED POISON-PROOF HOST CACHING
